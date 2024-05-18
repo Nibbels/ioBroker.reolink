@@ -1287,6 +1287,19 @@
       }
     },
     {
+      "_id": "device.scheduledRecordingVersion",
+      "type": "state",
+      "common": {
+        "role": "state",
+        "name": {
+          "en": "Api version of scheduled recording function"
+        },
+        "type": "number",
+        "read": true,
+        "write": false
+      }
+    },
+    {
       "_id": "settings.playAlarm",
       "type": "state",
       "common": {

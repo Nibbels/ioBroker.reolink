@@ -82,6 +82,7 @@ class ReoLinkCam extends utils.Adapter {
 
 		await this.getLocalLink();
 		await this.refreshState("onReady");
+		await this.getAbilities();
 		await this.getDriveInfo();
 		await this.getPtzGuardInfo();
 		await this.getAutoFocus();
@@ -324,7 +325,8 @@ class ReoLinkCam extends utils.Adapter {
 		this.log.debug("sendCmdObj: " + JSON.stringify(cmdObject));
 		try	{
 			if (this.reolinkApiClient) {
-				const result = await this.reolinkApiClient.post(`/api.cgi?cmd=${cmdName}&user=${this.config.cameraUser}&password=${this.config.cameraPassword}`, cmdObject);
+				const url = `/api.cgi?cmd=${cmdName}&user=${this.config.cameraUser}&password=${this.config.cameraPassword}`;
+				const result = await this.reolinkApiClient.post(url, cmdObject);
 				this.log.debug(JSON.stringify(result.status));
 				this.log.debug(JSON.stringify(result.data));
 				if ("error" in result.data[0])
@@ -523,8 +525,11 @@ class ReoLinkCam extends utils.Adapter {
 			return;
 		}
 
+		const scheduledRecordingVersionObject = await this.getStateAsync("device.scheduledRecordingVersion");
+		const cmdName = scheduledRecordingVersionObject.val === 1 ? "SetRec" : "SetRecV20";
+
 		const scheduledRecordingCmd = [{
-			"cmd": "SetRecV20",
+			"cmd": cmdName,
 			"param": {
 				"Rec": {
 					"enable": state ? 1 : 0, // The description in API Guide v8 had this key inside `schedule`, which does not work.
@@ -535,7 +540,7 @@ class ReoLinkCam extends utils.Adapter {
 			}
 		}];
 
-		this.sendCmd(scheduledRecordingCmd, "SetRecV20");
+		this.sendCmd(scheduledRecordingCmd, cmdName);
 	}
 	async getRecording(){
 		if (!this.reolinkApiClient) {
@@ -543,14 +548,17 @@ class ReoLinkCam extends utils.Adapter {
 		}
 
 		try {
+			const scheduledRecordingVersionObject = await this.getStateAsync("device.scheduledRecordingVersion");
+			const cmdName = scheduledRecordingVersionObject.val === 1 ? "GetRec" : "GetRecV20";
+
 			const recordingCmd = [{
-				"cmd": "GetRecV20",
+				"cmd": cmdName,
 				"action": 1,
 				"param": {
 					"channel": this.config.cameraChannel,
 				}
 			}];
-			const recordingSettingsResponse = await this.reolinkApiClient.post(`/api.cgi?cmd=GetRecV20&user=${this.config.cameraUser}&password=${this.config.cameraPassword}`, recordingCmd);
+			const recordingSettingsResponse = await this.reolinkApiClient.post(`/api.cgi?cmd=${cmdName}&user=${this.config.cameraUser}&password=${this.config.cameraPassword}`, recordingCmd);
 
 			this.log.debug(`recordingSettings ${JSON.stringify(recordingSettingsResponse.status)}: ${JSON.stringify(recordingSettingsResponse.data)}`);
 			if (recordingSettingsResponse.status !== 200) {
@@ -576,6 +584,43 @@ class ReoLinkCam extends utils.Adapter {
 					this.log.error(`An unknown scheduled recording state was detected: ${scheduledRecordingState}`);
 				}
 			}
+		} catch (error) {
+			this.apiConnected = false;
+			await this.setStateAsync("network.connected", {val: this.apiConnected, ack: true});
+			this.log.error(error);
+		}
+	}
+	async getAbilities() {
+		if (!this.reolinkApiClient) {
+			return;
+		}
+
+		try {
+			const abilityCmd = [{
+				"cmd": "GetAbility",
+				"action": 1,
+				"param": {
+					"User": {
+						"userName": this.config.cameraUser,
+					}
+				}
+			}];
+			const abilitySettingsResponse = await this.reolinkApiClient.post(`/api.cgi?cmd=GetAbility&user=${this.config.cameraUser}&password=${this.config.cameraPassword}`, abilityCmd);
+
+			this.log.debug(`GetAbility ${JSON.stringify(abilitySettingsResponse.status)}: ${JSON.stringify(abilitySettingsResponse.data)}`);
+			if (abilitySettingsResponse.status !== 200) {
+				return;
+			}
+
+			this.apiConnected = true;
+			await this.setStateAsync("network.connected", {val: this.apiConnected, ack: true});
+
+			const abilityValues = abilitySettingsResponse.data[0];
+			const abilityCn = abilityValues.value.Ability.abilityChn[0];
+			const recScheduleVersion = abilityCn.recSchedule.ver;
+			await this.setStateAsync("device.scheduledRecordingVersion", {val: recScheduleVersion, ack: true});
+
+			this.log.debug(`abilityChn.recSchedule.ver is: ${recScheduleVersion}`);
 		} catch (error) {
 			this.apiConnected = false;
 			await this.setStateAsync("network.connected", {val: this.apiConnected, ack: true});
